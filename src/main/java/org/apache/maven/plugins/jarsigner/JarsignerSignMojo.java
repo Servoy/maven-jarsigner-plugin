@@ -69,14 +69,6 @@ public class JarsignerSignMojo
      *
      * @since 1.3
      */
-    @Parameter( property = "jarsigner.tsa" )
-    private String tsa;
-
-    /**
-     * See <a href="https://docs.oracle.com/javase/7/docs/technotes/tools/windows/jarsigner.html#Options">options</a>.
-     *
-     * @since 1.3
-     */
     @Parameter( property = "jarsigner.tsacert" )
     private String tsacert;
     
@@ -131,7 +123,7 @@ public class JarsignerSignMojo
     {
         JarSignerSignRequest request = new JarSignerSignRequest();
         request.setSigfile( sigfile );
-        request.setTsaLocation( tsa );
+//        request.setTsaLocation( tsa );
         request.setTsaAlias( tsacert );
         request.setCertchain( certchain );
 

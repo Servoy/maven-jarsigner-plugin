@@ -29,6 +29,7 @@ import org.apache.maven.project.MavenProject;
 import org.apache.maven.settings.Settings;
 import org.apache.maven.shared.jarsigner.JarSigner;
 import org.apache.maven.shared.jarsigner.JarSignerRequest;
+import org.apache.maven.shared.jarsigner.JarSignerSignRequest;
 import org.apache.maven.shared.jarsigner.JarSignerUtil;
 import org.apache.maven.shared.utils.StringUtils;
 import org.apache.maven.shared.utils.cli.Commandline;
@@ -43,6 +44,7 @@ import org.sonatype.plexus.components.sec.dispatcher.SecDispatcherException;
 import java.io.File;
 import java.io.IOException;
 import java.text.MessageFormat;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -112,7 +114,34 @@ public abstract class AbstractJarsignerMojo
      * The maximum memory available to the JAR signer, e.g. <code>256M</code>. See <a
      * href="https://docs.oracle.com/javase/7/docs/technotes/tools/windows/java.html#Xms">-Xmx</a> for more details.
      */
-    @Parameter( property = "jarsigner.maxMemory" )
+    @Parameter ( property = "jarsigner.tsa" )
+    private String tsa;
+
+    /**
+     * See <a href=
+     * "https://docs.oracle.com/javase/7/docs/technotes/tools/windows/jarsigner.html#Options">options</a>.
+     *
+     * @since 1.3
+     */
+    @Parameter ( property = "jarsigner.tsaMaxRetry" )
+    private int tsaMaxRetry;
+
+    /**
+     * See <a href=
+     * "https://docs.oracle.com/javase/7/docs/technotes/tools/windows/jarsigner.html#Options">options</a>.
+     *
+     * @since 1.3
+     */
+    @Parameter ( property = "jarsigner.tsaRetryDelay" )
+    private int tsaRetryDelay;
+
+    /**
+     * The maximum memory available to the JAR signer, e.g. <code>256M</code>. See
+     * <a href=
+     * "https://docs.oracle.com/javase/7/docs/technotes/tools/windows/java.html#Xms">-Xmx</a>
+     * for more details.
+     */
+    @Parameter ( property = "jarsigner.maxMemory" )
     private String maxMemory;
 
     /**
@@ -556,19 +585,65 @@ public abstract class AbstractJarsignerMojo
 
         try
         {
-            JavaToolResult result = jarSigner.execute( request );
-
-            Commandline commandLine = result.getCommandline();
-
-            int resultCode = result.getExitCode();
-
-            if ( resultCode != 0 )
+            String[] tsaUrls = new String[0];
+            if ( this.tsa != null )
             {
-                // CHECKSTYLE_OFF: LineLength
-                throw new MojoExecutionException( getMessage( "failure", getCommandlineInfo( commandLine ), resultCode ) );
-                // CHECKSTYLE_ON: LineLength
+                tsaUrls = this.tsa.split( "," );
             }
 
+            if ( tsaUrls.length > 0 && request instanceof JarSignerSignRequest )
+            {
+                Commandline commandLine = null;
+                int resultCode = 0;
+                int maxRetries = this.tsaMaxRetry > 0 ? this.tsaMaxRetry : 1;
+                outer: for ( int retry = 0; retry < maxRetries; retry++ )
+                {
+                    for ( int i = 0; i < tsaUrls.length; i++ )
+                    {
+                        ( (JarSignerSignRequest) request ).setTsaLocation( tsaUrls[i] );
+                        JavaToolResult result = jarSigner.execute( request );
+                        resultCode = result.getExitCode();
+                        if ( resultCode == 0 )
+                        {
+                            commandLine = null;
+                            break outer;
+                        }
+                        getLog().info( "Failed to sign the jar with tsa url " + tsaUrls[i] );
+                        commandLine = result.getCommandline();
+                    }
+                    if ( this.tsaRetryDelay > 0 )
+                    {
+                        try
+                        {
+                            Thread.sleep( Duration.ofSeconds( this.tsaRetryDelay ).toMillis() );
+                        }
+                        catch ( InterruptedException e )
+                        {
+                        }
+                    }
+                }
+                if ( commandLine != null )
+                {
+                    throw new MojoExecutionException(
+                            getMessage( "failure", getCommandlineInfo( commandLine ), resultCode ) );
+                }
+            }
+            else
+            {
+                JavaToolResult result = jarSigner.execute( request );
+
+                Commandline commandLine = result.getCommandline();
+
+                int resultCode = result.getExitCode();
+
+                if ( resultCode != 0 )
+                {
+                    // CHECKSTYLE_OFF: LineLength
+                    throw new MojoExecutionException(
+                            getMessage( "failure", getCommandlineInfo( commandLine ), resultCode ) );
+                    // CHECKSTYLE_ON: LineLength
+                }
+            }
         }
         catch ( JavaToolException e )
         {
